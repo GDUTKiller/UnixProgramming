@@ -7,12 +7,12 @@ int main()
   int i;
   signal(SIGINT, f);
   for (i = 0; i < 5; ++i) {
-    printf("hello\n");
-    sleep(1);
+    sleep(2);
+    printf("for\n");
   }
 }
 
 void f(int signum)
 {
-  printf("OUCH!\n");
+  printf("int\n");
 }
