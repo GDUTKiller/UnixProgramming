@@ -30,6 +30,128 @@ void serve_file(int, const char *);
 int  startup(u_short *);
 void unimplemented(int);
 
+void accept_request(void *arg)
+{
+    int          client = (intptr_t)arg;
+    int          cgi = 0;
+    char         buf[1024];
+    char         method[255];
+    char         url[255];
+    char         path[255];
+    char        *query_string = NULL;
+    size_t       numchars;
+    size_t       i, j;
+    struct stat  st;
+
+    numchars = get_line(client, buf, sizeof(buf));
+    i = 0; j = 0;
+    while (!ISspace(buf[i]) && (i < sizeof(method) - 1)) {
+        method[i] = buf[i];
+        ++i;
+    }
+    j = i;
+    method[i] = '\0';
+
+    if (strcasecmp(method, "GET") && strcasecmp(method, "POST")) {
+        unimplemented(client);
+        return;
+    }
+
+    if (strcasecmp(method, "POST") == 0) {
+        cgi = 1;
+    }
+
+    i = 0;
+    while (ISspace(buf[j]) && (j < numchars)) {
+        j++;
+    }
+    while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < numchars)) {
+        url[i] = buf[j];
+        i++; j++;
+    }
+    url[i] = '\0';
+
+    if (strcasecmp(method, "GET") == 0) {
+        query_string = url;
+        while ((*query_string != '?') && (*query_string != '\0')) {
+             query_string++;
+        }
+        if (*query_string == '?') {
+            cgi = 1;
+            *query_string = '\0';
+            query_string++;
+        }
+    }
+
+    sprintf(path, "htdocs%s", url);
+    if (path[strlen(path) - 1] == '/') {
+        strcat(path, "index.html");
+    } 
+    if (stat(path, &st) == -1) {
+        while ((numchars > 0) && strcmp("\n", buf)) {
+            numchars = get_line(client, buf, sizeof(buf));
+        }
+        not_found(client);
+    } else {
+        if ((st.st_mode & S_IFMT) == S_IFDIR) {
+            strcat(path, "/index.html");
+        }
+        if ((st.st_mode & S_IXUSR)
+            || (st.st_mode & S_IXGRP)
+            || (st.st_mode & S_IXOTH)) {
+            cgi = 1;
+        }
+        if (!cgi) {
+            serve_file(client, path);
+        } else {
+            execute_cgi(client, path, method, query_string);
+        }
+    }
+    close(client);
+}
+
+/**********************************************************************/
+/* Get a line from a socket, whether the line ends in a newline,
+ * carriage return, or a CRLF combination.  Terminates the string read
+ * with a null character.  If no newline indicator is found before the
+ * end of the buffer, the string is terminated with a null.  If any of
+ * the above three line terminators is read, the last character of the
+ * string will be a linefeed and the string will be terminated with a
+ * null character.
+ * Parameters: the socket descriptor
+ *             the buffer to save the data in
+ *             the size of the buffer
+ * Returns: the number of bytes stored (excluding null) */
+/**********************************************************************/
+int get_line(int sock, char *buf, int size)
+{
+    int   i = 0, n;
+    char  c = '\0';
+
+    while ((i < size - 1) && (c != '\n')) {
+        n = recv(sock, &c, 1, 0);
+        /* DEBUG printf("%02X\n", c); */
+        if (n > 0) {
+            if (c == '\r') {
+                n = recv(sock, &c, 1, MSG_PEEK);
+                /* DEBUG printf("%02X\n", c); */
+                if ((n > 0 ) && (c == '\n')) {
+                    recv(sock , &c, 1, 0); 
+                } else {
+                    c = '\n'; 
+                }
+            }
+            buf[i] = c;
+            ++i;
+        } else {
+            c = '\n';
+        }
+    }
+    buf[i] = '\0';
+
+    return i;
+}
+
 /*
  * 这个函数在特定的端口上监听网络连接
  * 如果端口为0，则动态分配一个端口
